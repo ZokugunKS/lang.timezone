@@ -151,11 +151,11 @@ export class Timezone {
 		add(zones, links, rules) { // {{{
 			Object.merge($links, links)
 
-			for const name of rules {
+			for const :name of rules {
 				$rules[name] = $createRule(rules[name])
 			}
 
-			for const name of zones {
+			for const :name of zones {
 				$zones[name] = new Timezone(name, zones[name])
 			}
 		} // }}}

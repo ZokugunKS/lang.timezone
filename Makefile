@@ -13,7 +13,7 @@ else
 endif
 
 build:
-	npm-run kaoscript build.ks
+	npm-run kaoscript scripts/build.ks
 
 clean:
 	find -L . -type f \( -name "*.ksb" -o -name "*.ksh" -o -name "*.ksm" \) -exec rm {} \;

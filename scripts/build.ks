@@ -170,7 +170,7 @@ func compileZoneRule(data: Array<String>, zone) { // {{{
 func print(zones) { // {{{
 	const blocks = []
 
-	for const name, zone of zones {
+	for const zone, name of zones {
 		const rules = []
 
 		for const i from 0 til zone.length {
