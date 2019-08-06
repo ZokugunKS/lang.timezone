@@ -29,7 +29,7 @@ const $rules = {}
 func $createRule(data) { // {{{
 	const rules = []
 
-	for item in data {
+	for const item in data {
 		rules.push({
 			from: item[0]
 			to: item[1] + 1
@@ -170,7 +170,7 @@ export class Timezone {
 				return null
 			}
 		} // }}}
-		getOrUTC(name: String): Timezone => this.get(name) ?? this.get('Etc/UTC')
+		getOrUTC(name: String): Timezone => Timezone.get(name) ?? Timezone.get('Etc/UTC'):Timezone
 		getTimezoneNames(): Array<String> => Object.keys($zones)
 		isTimezone(value: String) => ?$zones[value] || ?$links[value]
 	}
