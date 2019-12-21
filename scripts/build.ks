@@ -3,10 +3,11 @@
 extern console
 
 import '@zokugun/lang'
+import '@zokugun/lang.date'(...)
 import 'fs'
 import 'path'
 
-const $months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const $months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 func compileLink(data, region) { // {{{
 	region.links[data[2]] = data[1]
@@ -19,11 +20,9 @@ func compileRegion(data: String) { // {{{
 		zones: {}
 	}
 
-	const lines = data.lines()
-
 	let line, lastZone
-	for const i from 0 til lines.length {
-		if (line = lines[i].trim()).length && line[0] != '#' {
+	for line in data.lines() {
+		if (line = line.trim()).length != 0 && line[0] != '#' {
 			if line.startsWith('Rule') {
 				compileRule(line.split(/\s+/), region)
 			}
@@ -34,7 +33,7 @@ func compileRegion(data: String) { // {{{
 				lastZone = compileZone(line.replace(/\s#.*$/, '').trim().split(/\s+/), region)
 			}
 			else {
-				compileZoneRule(line.replace(/\s#.*$/, '').trim().split(/\s+/), lastZone)
+				compileZoneRule(line.replace(/\s#.*$/, '').trim().split(/\s+/), lastZone!!)
 			}
 		}
 	}
@@ -50,7 +49,7 @@ func compileRule(data: Array<String>, region) { // {{{
 
 	const rule = []
 
-	rule.push(data[2].toInt())
+	rule.push(try! data[2].toInt())
 
 	if data[3] == 'only' {
 		rule.push(rule[0])
@@ -59,10 +58,10 @@ func compileRule(data: Array<String>, region) { // {{{
 		rule.push(9999)
 	}
 	else {
-		rule.push(data[3].toInt())
+		rule.push(try! data[3].toInt())
 	}
 
-	rule.push($months.indexOf(data[5]) + 1)
+	rule.push($months.indexOf(data[5]))
 
 	if data[6].startsWith('last') {
 		rule.push(1)
@@ -72,22 +71,25 @@ func compileRule(data: Array<String>, region) { // {{{
 	else if data[6].contains('>=') {
 		rule.push(2)
 		rule.push(data[6].substr(0, 2).toLowerCase())
-		rule.push(data[6].substr(5).toInt())
+		rule.push(try! data[6].substr(5).toInt())
 	}
 	else {
 		rule.push(0)
-		rule.push(0)
-		rule.push(data[6].toInt())
+		rule.push('')
+		rule.push(try! data[6].toInt())
 	}
 
-	rule.push(data[7].substringBefore(':').toInt())
+	rule.push(try! data[7].substringBefore(':', 0, data[7]).toInt())
 
 	rule.push(data[7].endsWith('u') || data[7].endsWith('g') || data[7].endsWith('z') ? 'u' : data[7].endsWith('s') ? 's' : 'w')
 
-	rule.push(data[8].substringBefore(':', 0, data[8]).toInt())
+	rule.push(try! data[8].substringBefore(':', 0, data[8]).toInt())
 
 	if data.length == 10 && data[9] != '-' {
 		rule.push(data[9])
+	}
+	else {
+		rule.push('')
 	}
 
 	rules.push(rule)
@@ -110,25 +112,25 @@ func compileZone(data, region) { // {{{
 } // }}}
 
 func compileZoneRule(data: Array<String>, zone) { // {{{
-	//console.log('zrule', data)
+	// console.log('zrule', data)
 	const rule = []
 
 	const info = data[0].split(':')
 
-	rule.push(info[0].toInt())
+	rule.push(try! info[0].toInt())
 
 	if info.length == 1 {
 		rule.push(0)
 		rule.push(0)
 	}
 	else {
-		rule.push(info[1].toInt())
+		rule.push(try! info[1].toInt())
 
 		if info.length == 2 {
 			rule.push(0)
 		}
 		else {
-			rule.push(info[2].toInt())
+			rule.push(try! info[2].toInt())
 		}
 	}
 
@@ -142,25 +144,26 @@ func compileZoneRule(data: Array<String>, zone) { // {{{
 	rule.push(data[2])
 
 	if data.length > 3 {
-		let date
+		let date: Date
 
 		if data.length == 4 {
-			date = new Date(data[3], 0, 1)
+			date = new Date(data[3], 1, 1)
 		}
 		else if data.length == 5 {
-			date = new Date(data[3].toInt(), $months.indexOf(data[4]), 1)
+			date = new Date(try! data[3].toInt(), $months.indexOf(data[4]), 1)
 		}
 		else if data.length == 6 {
-			date = new Date(data[3].toInt(), $months.indexOf(data[4]), data[5].toInt())
+			date = new Date(try! data[3].toInt(), $months.indexOf(data[4]), try data[5].toInt())
 		}
 		else if data.length == 7 {
-			date = new Date(data[3].toInt(), $months.indexOf(data[4]), data[5].toInt(), data[6].substringBefore(':').toInt(), data[6].substringAfter(':').toInt())
+			date = new Date(try! data[3].toInt(), $months.indexOf(data[4]), try data[5].toInt(), try! data[6].substringBefore(':').toInt(), try! data[6].substringAfter(':').toInt())
 		}
-		if !?date.getTime {
+		else {
 			console.log(data)
+			return
 		}
-		//console.log(info)
-		rule.push(date.getTime() - (date.getTimezoneOffset() * 60000))
+
+		rule.push(date.getEpochTime())
 	}
 
 	//console.log(rule)

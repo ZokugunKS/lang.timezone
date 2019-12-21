@@ -7,10 +7,10 @@
  * Licensed under the MIT license.
  * http://www.opensource.org/licenses/mit-license.php
  **/
-extern console
+require|import '@zokugun/lang'
+require|import '@zokugun/lang.date'(...)
 
-import '@zokugun/lang.date'
-import '@zokugun/lang/src/object/merge'
+include './types.ks'
 
 const $days = { // {{{
 	su: 'sunday'
@@ -22,18 +22,18 @@ const $days = { // {{{
 	sa: 'saturday'
 } // }}}
 
-const $zones = {}
-const $links = {}
-const $rules = {}
+const $zones: Dictionary<Timezone> = {}
+const $links: Dictionary<String> = {}
+const $rules: Dictionary<Array<Rule>> = {}
 
-func $createRule(data) { // {{{
+func $createRule(items: Array<Dictionary>): Array<Rule> { // {{{
 	const rules = []
 
-	for const item in data {
-		rules.push({
+	for const item in items {
+		rules.push(Rule(
 			from: item[0]
 			to: item[1] + 1
-			in: item[2] - 1
+			in: item[2]
 			onType: item[3]
 			onDayOfWeek: item[4]
 			onDayOfMonth: item[5] - 1
@@ -42,14 +42,14 @@ func $createRule(data) { // {{{
 			saveInHours: item[8]
 			saveInMinutes: item[8] * 60
 			saveInSeconds: item[8] * 3600
-			letters: item.length == 10 ? item[9] : ''
-		})
+			letters: item[9]
+		))
 	}
 
 	return rules
 } // }}}
 
-func $getDSTCutoverTime(rule, year, lastAtHour, zrule) { // {{{
+func $getDSTCutoverTime(rule: Rule, year: Number, lastAtHour: Number, zrule: ZoneRule): Number ~ ParseError { // {{{
 	let date: Date
 
 	if rule.atTime == 'u' {
@@ -59,18 +59,13 @@ func $getDSTCutoverTime(rule, year, lastAtHour, zrule) { // {{{
 		date = new Date(year, rule.in, $getDSTCutoverDayOfMonth(rule, year), rule.atHour + lastAtHour, 0, 0)
 	}
 	else {
-		if rule.saveHours {
-			date = new Date(year, rule.in, $getDSTCutoverDayOfMonth(rule, year), rule.atHour + lastAtHour, 0, 0)
-		}
-		else {
-			date = new Date(year, rule.in, $getDSTCutoverDayOfMonth(rule, year), rule.atHour, 0, 0)
-		}
+		date = new Date(year, rule.in, $getDSTCutoverDayOfMonth(rule, year), rule.atHour, 0, 0)
 	}
 
-	return date.getTime()
+	return date.getEpochTime()
 } // }}}
 
-func $getDSTCutoverDayOfMonth(rule, year) { // {{{
+func $getDSTCutoverDayOfMonth(rule: Rule, year: Number): Number ~ ParseError { // {{{
 	const date = new Date(year, rule.in, 1)
 
 	if rule.onType == 0 {
@@ -90,11 +85,11 @@ func $getDSTCutoverDayOfMonth(rule, year) { // {{{
 	return date.getDayOfMonth()
 } // }}}
 
-func $getRule(date, rules, zrule) { // {{{
-	let bestRule = null
+func $getRule(date: Date, rules: Array<Rule>, zrule: ZoneRule): Rule? ~ ParseError { // {{{
+	let bestRule: Rule? = null
 
-	const year = date.getFullYear()
-	const time = date.getTime()
+	const year = date.getYear()
+	const time = date.getEpochTime()
 
 	const crules = []
 	for const rule in rules {
@@ -113,7 +108,7 @@ func $getRule(date, rules, zrule) { // {{{
 		let lastAtHour = 0
 
 		for const rule in crules {
-			if (cutover = $getDSTCutoverTime(rule, year - 1, lastAtHour, zrule)) && cutover > bestCutover && cutover <= time {
+			if time >= (cutover = $getDSTCutoverTime(rule, year - 1, lastAtHour, zrule)) > bestCutover {
 				bestCutover = cutover
 				bestRule = rule
 			}
@@ -122,7 +117,7 @@ func $getRule(date, rules, zrule) { // {{{
 		}
 
 		for const rule in crules {
-			if (cutover = $getDSTCutoverTime(rule, year, lastAtHour, zrule)) && cutover > bestCutover && cutover <= time {
+			if time >= (cutover = $getDSTCutoverTime(rule, year, lastAtHour, zrule)) > bestCutover {
 				bestCutover = cutover
 				bestRule = rule
 			}
@@ -134,43 +129,54 @@ func $getRule(date, rules, zrule) { // {{{
 	return bestRule
 } // }}}
 
-func $getZoneRule(date, rules) { // {{{
+func $getZoneRule(date: Number, rules: Array<ZoneRule>): ZoneRule? { // {{{
 	for const rule in rules {
 		if date < rule.until {
 			return rule
 		}
 	}
+
+	return null
 } // }}}
 
-export class Timezone {
+class Timezone {
 	private {
-		_name: String
-		_rules: Array
+		@name: String
+		@rules: Array<ZoneRule>
 	}
 	static {
 		add(zones, links, rules) { // {{{
-			Object.merge($links, links)
+			Dictionary.merge($links, links)
 
-			for const :name of rules {
+			for const _, name of rules {
 				$rules[name] = $createRule(rules[name])
 			}
 
-			for const :name of zones {
+			for const _, name of zones {
 				$zones[name] = new Timezone(name, zones[name])
 			}
 		} // }}}
-		get(name: String): Timezone? { // {{{
-			if $zones[name]? {
-				return $zones[name]
-			}
-			else if $links[name]? && $zones[$links[name]]? {
-				return $zones[$links[name]]
+		get(name: String): Timezone ~ ParseError { // {{{
+			if const tz = Timezone.getOrNull(name) {
+				return tz
 			}
 			else {
-				return null
+				throw new ParseError(`Unrecognized timezone \(name.quote())`)
 			}
 		} // }}}
-		getOrUTC(name: String): Timezone => Timezone.get(name) ?? Timezone.get('Etc/UTC'):Timezone
+		getOrNull(name: String): Timezone? { // {{{
+			if const tz = $zones[name] {
+				return tz
+			}
+			else if const alias = $links[name] {
+				if const tz = $zones[alias] {
+					return tz
+				}
+			}
+
+			return null
+		} // }}}
+		getOrUTC(name: String): Timezone => Timezone.getOrNull(name) ?? try! Timezone.get('Etc/UTC')
 		getTimezoneNames(): Array<String> => Object.keys($zones)
 		isTimezone(value: String) => ?$zones[value] || ?$links[value]
 	}
@@ -178,7 +184,7 @@ export class Timezone {
 		@rules = []
 
 		for const rule in rules {
-			@rules.push({
+			@rules.push(ZoneRule(
 				offsetInMinutes: (rule[0] * 60) + rule[1]
 				offsetInSeconds: (rule[0] * 3600) + (rule[1] * 60) + rule[2]
 				offsetHours: rule[0]
@@ -187,43 +193,52 @@ export class Timezone {
 				name: rule[3]
 				format: rule[4]
 				until: rule.length == 6 ? rule[5] : Number.MAX_VALUE
-			})
+			))
 		}
 	} // }}}
-	convertToLocal(date: Date): Date => date.add('second', this.getUTCOffset(date, true))
-	convertToTimezone(date: Date, name: String): Date? { // {{{
-		if const timezone = Timezone.get(name) {
-			return this.convertToTimezone(date, timezone)
+	convertToLocal(date: Date): Date { // {{{
+		return date.add('second', this.getUTCOffset(date, true))
+	} // }}}
+	convertToTimezone(date: Date, name: String): Date ~ ParseError { // {{{
+		return this.convertToTimezone(date, Timezone.get(name))
+	} // }}}
+	convertToTimezone(date: Date, timezone: Timezone): Date { // {{{
+		const offset = timezone.getUTCOffset(date.rewind('second', this.getUTCOffset(date, true)), true)
+
+		return date.add('second', offset)
+	} // }}}
+	convertToUTC(date: Date): Date { // {{{
+		return date.rewind('second', this.getUTCOffset(date, true))
+	} // }}}
+	getAbbreviation(date: Date): String? { // {{{
+		if const zrule = $getZoneRule(date.getEpochTime(), @rules) {
+			if ?$rules[zrule.name] {
+				if const rule = try $getRule(date, $rules[zrule.name], zrule) {
+					return zrule.format.replace('%s', rule.letters)
+				}
+			}
+
+			return zrule.format.replace('%s', '')
 		}
 		else {
 			return null
 		}
 	} // }}}
-	convertToTimezone(date: Date, timezone: Timezone): Date => date.add('second', timezone.getUTCOffset(date.rewind('second', this.getUTCOffset(date, true)), true))
-	convertToUTC(date: Date): Date => date.rewind('second', this.getUTCOffset(date, true))
-	getAbbreviation(date: Date): String { // {{{
-		const zrule = $getZoneRule(date, @rules)
-
-		if ?$rules[zrule.name] {
-			if rule ?= $getRule(date, $rules[zrule.name], zrule) {
-				return zrule.format.replace('%s', rule.letters)
-			}
-		}
-
-		return zrule.format.replace('%s', '')
-	} // }}}
 	getUTCOffset(date: Date, precise: Boolean = false): Number { // {{{
-		const zrule = $getZoneRule(date, @rules)
-
-		if $rules[zrule.name]? {
-			if rule ?= $getRule(date, $rules[zrule.name], zrule) {
-				return precise ? zrule.offsetInSeconds + rule.saveInSeconds : zrule.offsetInMinutes + rule.saveInMinutes
+		if const zrule = $getZoneRule(date.getEpochTime(), @rules) {
+			if const rules = $rules[zrule.name] {
+				if const rule = try $getRule(date, rules, zrule) {
+					return precise ? zrule.offsetInSeconds + rule.saveInSeconds : zrule.offsetInMinutes + rule.saveInMinutes
+				}
 			}
-		}
 
-		return precise ? zrule.offsetInSeconds : zrule.offsetInMinutes
+			return precise ? zrule.offsetInSeconds : zrule.offsetInMinutes
+		}
+		else {
+			return 0
+		}
 	} // }}}
-	name() => @name
+	name(): String => @name
 }
 
 include './tz.africa'
@@ -235,3 +250,5 @@ include './tz.etcetera'
 include './tz.europe'
 include './tz.northamerica'
 include './tz.southamerica'
+
+export Date, ParseError, Timezone
