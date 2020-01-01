@@ -224,6 +224,20 @@ class Timezone {
 			return null
 		}
 	} // }}}
+	getDSTOffset(date: Date, precise: Boolean = false): Number { // {{{
+		if const zrule = $getZoneRule(date.getEpochTime(), @rules) {
+			if const rules = $rules[zrule.name] {
+				if const rule = try $getRule(date, rules, zrule) {
+					return precise ? rule.saveInSeconds : rule.saveInMinutes
+				}
+			}
+
+			return 0
+		}
+		else {
+			return 0
+		}
+	} // }}}
 	getUTCOffset(date: Date, precise: Boolean = false): Number { // {{{
 		if const zrule = $getZoneRule(date.getEpochTime(), @rules) {
 			if const rules = $rules[zrule.name] {
