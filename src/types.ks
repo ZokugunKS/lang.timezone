@@ -25,3 +25,9 @@ struct ZoneRule {
 	format: String
 	until: Number
 }
+
+struct Cutover {
+	rule: Rule
+	cutover: Number
+	delta: Number
+}

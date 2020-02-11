@@ -49,8 +49,8 @@ func $createRule(items: Array<Dictionary>): Array<Rule> { // {{{
 	return rules
 } // }}}
 
-func $getDSTCutoverTime(rule: Rule, year: Number, lastAtHour: Number, zrule: ZoneRule): Number ~ ParseError { // {{{
-	let date: Date
+func $getLocalCutoverTime(rule: Rule, year: Number, lastAtHour: Number, zrule: ZoneRule): Number ~ ParseError { // {{{
+	lateinit const date: Date
 
 	if rule.atTime == 'u' {
 		date = new Date(year, rule.in, $getDSTCutoverDayOfMonth(rule, year), rule.atHour + lastAtHour + zrule.offsetHours, zrule.offsetMinutes, zrule.offsetSeconds)
@@ -62,7 +62,22 @@ func $getDSTCutoverTime(rule: Rule, year: Number, lastAtHour: Number, zrule: Zon
 		date = new Date(year, rule.in, $getDSTCutoverDayOfMonth(rule, year), rule.atHour, 0, 0)
 	}
 
-	return date.getEpochTime()
+	return date.getTime()
+} // }}}
+
+func $getUTCCutoverTime(rule: Rule, year: Number, zrule: ZoneRule): Number ~ ParseError { // {{{
+	lateinit const offset: Number
+
+	if rule.atTime == 'u' {
+		offset = 0
+	}
+	else {
+		offset = zrule.offsetInMinutes * 60000
+	}
+
+	const date = new Date(year, rule.in, $getDSTCutoverDayOfMonth(rule, year), rule.atHour, 0, 0)
+
+	return date.getTime() - offset
 } // }}}
 
 func $getDSTCutoverDayOfMonth(rule: Rule, year: Number): Number ~ ParseError { // {{{
@@ -85,11 +100,12 @@ func $getDSTCutoverDayOfMonth(rule: Rule, year: Number): Number ~ ParseError { /
 	return date.getDayOfMonth()
 } // }}}
 
-func $getRule(date: Date, rules: Array<Rule>, zrule: ZoneRule): Rule? ~ ParseError { // {{{
+func $getCutover(date: Date, rules: Array<Rule>, zrule: ZoneRule): Cutover? ~ ParseError { // {{{
 	let bestRule: Rule? = null
+	let bestCutover = Number.MIN_VALUE
 
 	const year = date.getYear()
-	const time = date.getEpochTime()
+	const time = date.getTime()
 
 	const crules = []
 	for const rule in rules {
@@ -98,40 +114,101 @@ func $getRule(date: Date, rules: Array<Rule>, zrule: ZoneRule): Rule? ~ ParseErr
 		}
 	}
 
-	if crules.length == 1 {
-		if (cutover ?= $getDSTCutoverTime(crules.last(), year, 0, zrule)) && cutover <= time {
-			bestRule = crules.last()
+	if date.isUTC() {
+		if crules.length == 1 {
+			if const cutover = $getUTCCutoverTime(crules.last(), year, zrule) {
+				if cutover <= time {
+					bestCutover = cutover
+					bestRule = crules.last()
+				}
+			}
+		}
+		else {
+			crules.sort((a, b) => a.in - b.in)
+
+			for const rule in crules {
+				const cutover = $getUTCCutoverTime(rule, year - 1, zrule)
+
+				if time >= cutover > bestCutover {
+					bestCutover = cutover
+					bestRule = rule
+				}
+			}
+
+			for const rule in crules {
+				const cutover = $getUTCCutoverTime(rule, year, zrule)
+
+				if time >= cutover > bestCutover {
+					bestCutover = cutover
+					bestRule = rule
+				}
+			}
 		}
 	}
 	else {
-		let bestCutover = Number.MIN_VALUE
-		let lastAtHour = 0
-
-		for const rule in crules {
-			if time >= (cutover = $getDSTCutoverTime(rule, year - 1, lastAtHour, zrule)) > bestCutover {
-				bestCutover = cutover
-				bestRule = rule
+		if crules.length == 1 {
+			if const cutover = $getLocalCutoverTime(crules.last(), year, 0, zrule) {
+				if cutover <= time {
+					bestCutover = cutover
+					bestRule = crules.last()
+				}
 			}
-
-			lastAtHour = rule.saveInHours
 		}
+		else {
+			crules.sort((a, b) => a.in - b.in)
 
-		for const rule in crules {
-			if time >= (cutover = $getDSTCutoverTime(rule, year, lastAtHour, zrule)) > bestCutover {
-				bestCutover = cutover
-				bestRule = rule
+			let lastAtHour = 0
+
+			for const rule in crules {
+				const cutover = $getLocalCutoverTime(rule, year - 1, lastAtHour, zrule)
+
+				if time >= cutover > bestCutover {
+					bestCutover = cutover
+					bestRule = rule
+				}
+
+				lastAtHour = rule.saveInHours
 			}
 
-			lastAtHour = rule.saveInHours
+			for const rule in crules {
+				const cutover = $getLocalCutoverTime(rule, year, lastAtHour, zrule)
+
+				if time >= cutover > bestCutover {
+					bestCutover = cutover
+					bestRule = rule
+				}
+
+				lastAtHour = rule.saveInHours
+			}
 		}
 	}
 
-	return bestRule
+	if bestRule == null {
+		return null
+	}
+	else {
+		return Cutover(
+			rule: bestRule
+			cutover: bestCutover
+			delta: time - bestCutover
+		)
+	}
 } // }}}
 
-func $getZoneRule(date: Number, rules: Array<ZoneRule>): ZoneRule? { // {{{
+func $getRule(date: Date, rules: Array<Rule>, zrule: ZoneRule): Rule? ~ ParseError { // {{{
+	if const cutover = $getCutover(date, rules, zrule) {
+		return cutover.rule
+	}
+	else {
+		return null
+	}
+} // }}}
+
+func $getZoneRule(date: Date, rules: Array<ZoneRule>): ZoneRule? { // {{{
+	const time = date.getTime()
+
 	for const rule in rules {
-		if date < rule.until {
+		if time < rule.until {
 			return rule
 		}
 	}
@@ -145,7 +222,9 @@ class Timezone {
 		@rules: Array<ZoneRule>
 	}
 	static {
-		add(zones, links, rules) { // {{{
+		lateinit const UTC
+
+		add(zones, links, rules): Void { // {{{
 			Dictionary.merge($links, links)
 
 			for const _, name of rules {
@@ -176,7 +255,7 @@ class Timezone {
 
 			return null
 		} // }}}
-		getOrUTC(name: String): Timezone => Timezone.getOrNull(name) ?? try! Timezone.get('Etc/UTC')
+		getOrUTC(name: String): Timezone => Timezone.getOrNull(name) ?? Timezone.UTC
 		getTimezoneNames(): Array<String> => Object.keys($zones)
 		isTimezone(value: String) => ?$zones[value] || ?$links[value]
 	}
@@ -211,7 +290,7 @@ class Timezone {
 		return date.rewind('second', this.getUTCOffset(date, true))
 	} // }}}
 	getAbbreviation(date: Date): String? { // {{{
-		if const zrule = $getZoneRule(date.getEpochTime(), @rules) {
+		if const zrule = $getZoneRule(date, @rules) {
 			if ?$rules[zrule.name] {
 				if const rule = try $getRule(date, $rules[zrule.name], zrule) {
 					return zrule.format.replace('%s', rule.letters)
@@ -224,11 +303,20 @@ class Timezone {
 			return null
 		}
 	} // }}}
-	getDSTOffset(date: Date, precise: Boolean = false): Number { // {{{
-		if const zrule = $getZoneRule(date.getEpochTime(), @rules) {
+	getCutover(date: Date): Cutover? { // {{{
+		if const zrule = $getZoneRule(date, @rules) {
+			if const rules = $rules[zrule.name] {
+				return try $getCutover(date, rules, zrule)
+			}
+		}
+
+		return null
+	} // }}}
+	getDSTOffset(date: Date, inSeconds: Boolean = false): Number { // {{{
+		if const zrule = $getZoneRule(date, @rules) {
 			if const rules = $rules[zrule.name] {
 				if const rule = try $getRule(date, rules, zrule) {
-					return precise ? rule.saveInSeconds : rule.saveInMinutes
+					return inSeconds ? rule.saveInSeconds : rule.saveInMinutes
 				}
 			}
 
@@ -238,20 +326,21 @@ class Timezone {
 			return 0
 		}
 	} // }}}
-	getUTCOffset(date: Date, precise: Boolean = false): Number { // {{{
-		if const zrule = $getZoneRule(date.getEpochTime(), @rules) {
+	getUTCOffset(date: Date, inSeconds: Boolean = false): Number { // {{{
+		if const zrule = $getZoneRule(date, @rules) {
 			if const rules = $rules[zrule.name] {
 				if const rule = try $getRule(date, rules, zrule) {
-					return precise ? zrule.offsetInSeconds + rule.saveInSeconds : zrule.offsetInMinutes + rule.saveInMinutes
+					return inSeconds ? zrule.offsetInSeconds + rule.saveInSeconds : zrule.offsetInMinutes + rule.saveInMinutes
 				}
 			}
 
-			return precise ? zrule.offsetInSeconds : zrule.offsetInMinutes
+			return inSeconds ? zrule.offsetInSeconds : zrule.offsetInMinutes
 		}
 		else {
 			return 0
 		}
 	} // }}}
+	isUTC(): Boolean => @name == 'Etc/UTC'
 	name(): String => @name
 }
 
@@ -264,5 +353,7 @@ include './tz.etcetera'
 include './tz.europe'
 include './tz.northamerica'
 include './tz.southamerica'
+
+Timezone.UTC = try! Timezone.get('Etc/UTC')
 
 export Date, ParseError, Timezone

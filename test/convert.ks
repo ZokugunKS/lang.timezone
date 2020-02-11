@@ -4,7 +4,6 @@
 extern {
 	describe:	func
 	it:			func
-	console
 }
 
 import {
