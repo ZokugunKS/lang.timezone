@@ -10,12 +10,16 @@ struct Rule {
 	atHour: Number
 	atTime: String
 	saveInHours: Number
+	saveInMilliseconds: Number
 	saveInMinutes: Number
 	saveInSeconds: Number
 	letters: String
+	cache: Dictionary	= {}
 }
 
 struct ZoneRule {
+	offsetInHours: Number
+	offsetInMilliseconds: Number
 	offsetInMinutes: Number
 	offsetInSeconds: Number
 	offsetHours: Number
@@ -24,10 +28,4 @@ struct ZoneRule {
 	name: String
 	format: String
 	until: Number
-}
-
-struct Cutover {
-	rule: Rule
-	cutover: Number
-	delta: Number
 }
