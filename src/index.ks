@@ -375,4 +375,4 @@ include './tz.southamerica'
 
 Timezone.UTC = try! Timezone.get('Etc/UTC')
 
-export Date, DateField, Timezone, TimeUnit, WeekField, ParseError
+export Date, DateField, MonthField, Timezone, TimeUnit, WeekField, ParseError
