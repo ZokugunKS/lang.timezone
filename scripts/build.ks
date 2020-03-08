@@ -20,11 +20,13 @@ func compileRegion(data: String) { // {{{
 		zones: {}
 	}
 
-	let line, lastZone
+	let line, lastZone, rule
+	let distribution = null
+
 	for line in data.lines() {
 		if (line = line.trim()).length != 0 && line[0] != '#' {
 			if line.startsWith('Rule') {
-				compileRule(line.split(/\s+/), region)
+				distribution = compileRule(line.split(/\s+/), region, distribution)
 			}
 			else if line.startsWith('Link') {
 				compileLink(line.split(/\s+/), region)
@@ -38,19 +40,38 @@ func compileRegion(data: String) { // {{{
 		}
 	}
 
+	if distribution != null {
+		completeDistribution(region, distribution)
+	}
+
 	return region
 } // }}}
 
-func compileRule(data: Array<String>, region) { // {{{
-	let rules = region.rules[data[1]]
+func compileRule(data: Array<String>, region, distribution?) { // {{{
+	const name = data[1]
+
+	let rules = region.rules[name]
 	if !?rules {
-		rules = region.rules[data[1]] = []
+		if distribution != null {
+			completeDistribution(region, distribution)
+		}
+
+		rules = region.rules[name] = []
+
+		distribution = {
+			name
+			last: 0
+			years: {}
+			letters: {}
+		}
 	}
 
 	const rule = []
 
+	// from
 	rule.push(try! data[2].toInt())
 
+	// to
 	if data[3] == 'only' {
 		rule.push(rule[0])
 	}
@@ -61,8 +82,10 @@ func compileRule(data: Array<String>, region) { // {{{
 		rule.push(try! data[3].toInt())
 	}
 
+	// in
 	rule.push($months.indexOf(data[5]))
 
+	// on
 	if data[6].startsWith('last') {
 		rule.push(1)
 		rule.push(data[6].substr(4, 2).toLowerCase())
@@ -79,13 +102,17 @@ func compileRule(data: Array<String>, region) { // {{{
 		rule.push(try! data[6].toInt())
 	}
 
+	// atHour
 	rule.push(try! data[7].substringBefore(':', 0, data[7]).toInt())
 
+	// atTime
 	rule.push(data[7].endsWith('u') || data[7].endsWith('g') || data[7].endsWith('z') ? 'u' : data[7].endsWith('s') ? 's' : 'w')
 
+	// save
 	rule.push(try! data[8].substringBefore(':', 0, data[8]).toInt())
 
-	if data.length == 10 && data[9] != '-' {
+	// letters
+	if data.length >= 10 && data[9] != '-' {
 		rule.push(data[9])
 	}
 	else {
@@ -93,10 +120,25 @@ func compileRule(data: Array<String>, region) { // {{{
 	}
 
 	rules.push(rule)
+
+	const d = rule[8] == 1 ? 1 : -1
+
+	distribution.last = rule[1] == 9999 ? rule[0] : rule[1]
+
+	for const i from rule[0] to distribution.last {
+		if distribution.years[i]? {
+			distribution.years[i] += d
+		}
+		else {
+			distribution.years[i] = d
+			distribution.letters[i] = rule[9]
+		}
+	}
+
+	return distribution
 } // }}}
 
 func compileZone(data, region) { // {{{
-	//console.log('zone', data)
 	let zone = region.zones[data[1]]
 	if !?zone {
 		zone = region.zones[data[1]] = []
@@ -107,33 +149,41 @@ func compileZone(data, region) { // {{{
 
 	compileZoneRule(data, zone)
 
-	//console.log(zone)
 	return zone
 } // }}}
 
 func compileZoneRule(data: Array<String>, zone) { // {{{
-	// console.log('zrule', data)
 	const rule = []
 
+	// offset
 	const info = data[0].split(':')
 
-	rule.push(try! info[0].toInt())
+	auto hours = try! info[0].toInt()
+
+	if data[1] == '1:00' {
+		data[1] = '-'
+		hours += 1
+	}
+
+	rule.push(hours)
+
+	const neg = hours < 0 ? -1 : 1
 
 	if info.length == 1 {
-		rule.push(0)
-		rule.push(0)
+		rule.push(0, 0)
 	}
 	else {
-		rule.push(try! info[1].toInt())
+		rule.push(neg * (try! info[1].toInt()))
 
 		if info.length == 2 {
 			rule.push(0)
 		}
 		else {
-			rule.push(try! info[2].toInt())
+			rule.push(neg * (try! info[2].toInt()))
 		}
 	}
 
+	// rule
 	if data[1] == '-' {
 		rule.push('')
 	}
@@ -141,8 +191,18 @@ func compileZoneRule(data: Array<String>, zone) { // {{{
 		rule.push(data[1])
 	}
 
-	rule.push(data[2])
+	// abbr
+	if data[2].contains('%s') {
+		rule.push(0, data[2])
+	}
+	else if data[2].contains('/') {
+		rule.push(1, data[2].split('/'))
+	}
+	else {
+		rule.push(2, data[2])
+	}
 
+	// until
 	if data.length > 3 {
 		let date: Date
 
@@ -166,8 +226,22 @@ func compileZoneRule(data: Array<String>, zone) { // {{{
 		rule.push(date.getEpochTime())
 	}
 
-	//console.log(rule)
 	zone.push(rule)
+} // }}}
+
+func completeDistribution(region, distribution) { // {{{
+	let rules = region.rules[distribution.name]
+
+	for const value, year of distribution.years when value == 1 {
+		let iYear = try! year.toInt()
+		let y = iYear + 1
+
+		while y <= distribution.last && !?distribution.years[y] {
+			y++
+		}
+
+		rules.push([iYear + 1, y, 0, 3, '', 0, 0, '', 1, distribution.letters[year]])
+	}
 } // }}}
 
 func print(zones) { // {{{
@@ -190,14 +264,12 @@ for const name in ['africa', 'antarctica', 'asia', 'australasia', 'backward', 'e
 	const region = compileRegion(fs.readFileSync(path.join('tzdata', name), {
 		encoding: 'utf8'
 	}))
-	//console.log(region)
 
 	let text = `Timezone.add({\n`
 	text += print(region.zones)
 	text += '}, ' + JSON.stringify(region.links, null, '\t') + ', {\n'
 	text += print(region.rules)
 	text += '})\n'
-	//console.log(text)
 
 	fs.writeFileSync(path.join('src', `tz.\(name).ks`), text, {
 		encoding: 'utf8'

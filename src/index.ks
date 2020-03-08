@@ -26,6 +26,23 @@ const $zones: Dictionary<Timezone> = {}
 const $links: Dictionary<String> = {}
 const $rules: Dictionary<Array<Rule>> = {}
 
+func $createAbbreviation(type: Number, value) { // {{{
+	switch type {
+		0 => return {
+			type: 0
+			format: value
+		}
+		1 => return {
+			type: 1
+			values: value
+		}
+		_ => return {
+			type: 2
+			value: value
+		}
+	}
+} // }}}
+
 func $createRule(items: Array<Dictionary>): Array<Rule> { // {{{
 	const rules = []
 
@@ -100,11 +117,11 @@ func $getDSTCutoverDayOfMonth(rule: Rule, year: Number): Number ~ ParseError { /
 
 func $getRule(time: Number, rules: Array<Rule>, zrule: ZoneRule): Rule? ~ ParseError { // {{{
 	let bestRule: Rule? = null
-	let bestCutover = Number.MIN_VALUE
+	let bestCutover = Number.MIN_SAFE_INTEGER
 
 	const year = $getYear(time)
 
-	const crules = [rule for const rule in rules when year >= rule.from && year < rule.to]
+	const crules = [rule for const rule in rules when year >= rule.from && year <= rule.to]
 
 	if crules.length == 1 {
 		if const cutover = $getDSTCutoverTime(crules.last(), year, zrule) {
@@ -117,7 +134,7 @@ func $getRule(time: Number, rules: Array<Rule>, zrule: ZoneRule): Rule? ~ ParseE
 	else {
 		crules.sort((a, b) => a.in - b.in)
 
-		for const rule in crules {
+		for const rule in crules when year > rule.from {
 			const cutover = $getDSTCutoverTime(rule, year - 1, zrule)
 
 			if time >= cutover > bestCutover {
@@ -126,7 +143,7 @@ func $getRule(time: Number, rules: Array<Rule>, zrule: ZoneRule): Rule? ~ ParseE
 			}
 		}
 
-		for const rule in crules {
+		for const rule in crules when year < rule.to {
 			const cutover = $getDSTCutoverTime(rule, year, zrule)
 
 			if time >= cutover > bestCutover {
@@ -238,21 +255,35 @@ class Timezone {
 				offsetMinutes: rule[1]
 				offsetSeconds: rule[2]
 				name: rule[3]
-				format: rule[4]
-				until: rule.length == 6 ? rule[5] : Number.MAX_VALUE
+				abbr: $createAbbreviation(rule[4], rule[5])
+				until: rule.length == 7 ? rule[6] : Number.MAX_SAFE_INTEGER
 			))
 		}
 	} // }}}
 	getAbbreviation(date: Date): String? => this.getAbbreviation(date.getTime())
 	getAbbreviation(time: Number): String? { // {{{
 		if const zrule = $getZoneRule(time, @rules) {
+			if zrule.abbr.type == 2 {
+				return zrule.abbr.value
+			}
+
 			if ?$rules[zrule.name] {
 				if const rule = try $getRule(time, $rules[zrule.name], zrule) {
-					return zrule.format.replace('%s', rule.letters)
+					if zrule.abbr.type == 0 {
+						return zrule.abbr.format!?.replace('%s', rule.letters)
+					}
+					else {
+						return zrule.abbr.values!?[rule.saveInSeconds == 0 ? 0 : 1]
+					}
 				}
 			}
 
-			return zrule.format.replace('%s', '')
+			if zrule.abbr.type == 0 {
+				return zrule.abbr.format!?.replace('%s', 'S')
+			}
+			else {
+				return zrule.abbr.values!?[0]
+			}
 		}
 		else {
 			return null

@@ -26,6 +26,11 @@ struct ZoneRule {
 	offsetMinutes: Number
 	offsetSeconds: Number
 	name: String
-	format: String
+	abbr: {
+		type: Number
+		format: String?
+		value: String?
+		values: Array<String>?
+	}
 	until: Number
 }
